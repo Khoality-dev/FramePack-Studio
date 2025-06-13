@@ -137,7 +137,18 @@ class OriginalWithEndframePipeline(BasePipeline):
             
             # Store the processed end frame image
             processed_inputs['end_frame_image'] = end_frame_np
-        
+
+        # Process additional frames if provided
+        additional_frames = job_params.get('additional_frames')
+        if additional_frames:
+            height = processed_inputs['height']
+            width = processed_inputs['width']
+            processed_frames = []
+            for frame in additional_frames:
+                frame_np = resize_and_center_crop(frame, target_width=width, target_height=height)
+                processed_frames.append(frame_np)
+            processed_inputs['additional_frames'] = processed_frames
+
         return processed_inputs
     
     def handle_results(self, job_params, result):

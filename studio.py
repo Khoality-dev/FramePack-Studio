@@ -304,6 +304,7 @@ job_queue.set_worker_function(worker)
 def process(
         model_type,
         input_image,
+        additional_frames,
         end_frame_image,     # NEW
         end_frame_strength,  # NEW        
         prompt_text,
@@ -391,6 +392,29 @@ def process(
             print(f"Copied end frame image to {end_frame_image_path}")
         except Exception as e:
             print(f"Error copying end frame image: {e}")
+
+    # Process additional frames if provided
+    processed_additional_frames = []
+    if additional_frames:
+        for frame in additional_frames:
+            frame_path = None
+            if isinstance(frame, str) and os.path.exists(frame):
+                frame_path = frame
+            elif hasattr(frame, "name") and os.path.exists(frame.name):
+                frame_path = frame.name
+            if frame_path:
+                try:
+                    filename = os.path.basename(frame_path)
+                    copied_path = os.path.join(input_files_dir, f"{generate_timestamp()}_{filename}")
+                    shutil.copy2(frame_path, copied_path)
+                    print(f"Copied additional frame to {copied_path}")
+                    frame_np = np.array(Image.open(copied_path).convert("RGB"))
+                except Exception as e:
+                    print(f"Error copying additional frame: {e}")
+                    frame_np = np.array(Image.open(frame_path).convert("RGB"))
+            else:
+                frame_np = np.array(frame) if not isinstance(frame, np.ndarray) else frame
+            processed_additional_frames.append(frame_np)
     
     # Extract lora_loaded_names from lora_args
     lora_loaded_names = lora_args[0] if lora_args and len(lora_args) > 0 else []
@@ -425,6 +449,7 @@ def process(
         'end_frame_image_path': end_frame_image_path,  # Add the path to the copied end frame image
         'resolutionW': resolutionW, # Add resolution parameter
         'resolutionH': resolutionH,
+        'additional_frames': processed_additional_frames,
         'lora_loaded_names': lora_loaded_names,
         'combine_with_source': combine_with_source,  # Add combine_with_source parameter
         'num_cleaned_frames': num_cleaned_frames,

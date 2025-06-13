@@ -54,6 +54,7 @@ def get_cached_or_encode_prompt(prompt, text_encoder, text_encoder_2, tokenizer,
 def worker(
     model_type,
     input_image,
+    additional_frames,
     end_frame_image,     # The end frame image (numpy array or None)
     end_frame_strength,  # Influence of the end frame
     prompt_text, 
@@ -475,6 +476,21 @@ def worker(
                     end_clip_embedding = hf_clip_vision_encode(end_frame_np, feature_extractor, image_encoder).last_hidden_state
                     end_clip_embedding = end_clip_embedding.to(studio_module.current_generator.transformer.dtype)
                     # Need that dtype conversion for end_clip_embedding? I don't think so, but it was in the original PR.
+
+        # Process additional frames if provided
+        additional_frame_latents = []
+        if model_type == "Original with Endframe" and job_params.get('additional_frames'):
+            for frame_np in job_params['additional_frames']:
+                frame_pt = torch.from_numpy(frame_np).float() / 127.5 - 1
+                frame_pt = frame_pt.permute(2, 0, 1)[None, :, None]
+                if not high_vram:
+                    load_model_as_complete(vae, target_device=gpu)
+                from diffusers_helper.hunyuan import vae_encode
+                lat = vae_encode(frame_pt, vae)
+                additional_frame_latents.append(lat)
+            if not high_vram:
+                offload_model_from_device_for_memory_preservation(vae, target_device=gpu, preserved_memory_gb=settings.get("gpu_memory_preservation"))
+            print(f"Processed {len(additional_frame_latents)} additional frame latents")
         
         if not high_vram: # Offload VAE and image_encoder if they were loaded
             offload_model_from_device_for_memory_preservation(vae, target_device=gpu, preserved_memory_gb=settings.get("gpu_memory_preservation"))
@@ -515,6 +531,13 @@ def worker(
         
         # Get latent paddings from the generator
         latent_paddings = studio_module.current_generator.get_latent_paddings(total_latent_sections)
+
+        # Determine which sections will receive additional frame latents
+        apply_schedule = {}
+        if model_type == "Original with Endframe" and (end_frame_latent is not None or additional_frame_latents):
+            frame_latents_sequence = [end_frame_latent] + additional_frame_latents
+            indices = np.linspace(0, len(latent_paddings) - 1, len(frame_latents_sequence), dtype=int)
+            apply_schedule = {int(i): lat for i, lat in zip(indices, frame_latents_sequence) if lat is not None}
 
         # PROMPT BLENDING: Track section index
         section_idx = 0
@@ -715,11 +738,12 @@ def worker(
                   f'time position: {current_time_position:.2f}s (original: {original_time_position:.2f}s), '
                   f'using prompt: {current_prompt[:60]}...')
 
-            # Apply end_frame_latent to history_latents for models with Endframe support
-            if (model_type == "Original with Endframe") and i_section_loop == 0 and end_frame_latent is not None:
-                print(f"Applying end_frame_latent to history_latents with strength: {end_frame_strength}")
-                actual_end_frame_latent_for_history = end_frame_latent.clone()
-                if end_frame_strength != 1.0: # Only multiply if not full strength
+            # Apply scheduled frame latents for models with Endframe support
+            if (model_type == "Original with Endframe") and i_section_loop in apply_schedule:
+                latent_to_apply = apply_schedule[i_section_loop].clone()
+                print(f"Applying scheduled frame latent at section {i_section_loop} with strength: {end_frame_strength}")
+                actual_end_frame_latent_for_history = latent_to_apply
+                if end_frame_strength != 1.0:
                     actual_end_frame_latent_for_history = actual_end_frame_latent_for_history * end_frame_strength
                 
                 # Ensure history_latents is on the correct device (usually CPU for this kind of modification if it's init'd there)

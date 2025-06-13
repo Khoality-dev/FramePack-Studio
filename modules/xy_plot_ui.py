@@ -118,6 +118,7 @@ def xy_plot_process(
         "input_image": input_image,
         "end_frame_image": None,
         "end_frame_strength": 1.0,
+        "additional_frames": [],
         "input_video": None,
         "end_frame_image_original": end_frame_image_original,
         "end_frame_strength_original": end_frame_strength_original,

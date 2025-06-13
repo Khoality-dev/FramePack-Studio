@@ -412,7 +412,7 @@ def create_interface(
                         # --- END OF REFACTORED XY PLOT SECTION ---
 
                         with gr.Group(visible=True) as standard_generation_group:    # Default visibility: True because "Original" model is not "Video"
-                            with gr.Group(visible=True) as image_input_group: # This group now only contains the start frame image
+                            with gr.Group(visible=True) as image_input_group: # This group now contains start and additional frames
                                 with gr.Row():
                                     with gr.Column(scale=1): # Start Frame Image Column
                                         input_image = gr.Image(
@@ -424,6 +424,12 @@ def create_interface(
                                             show_download_button=False,
                                             show_label=True, # Keep label for clarity
                                             container=True
+                                        )
+                                    with gr.Column(scale=1): # Additional Frames Column
+                                        additional_frames = gr.Files(
+                                            label="Additional Frames (optional)",
+                                            file_count="multiple",
+                                            file_types=["image"]
                                         )
                             
                             with gr.Group(visible=False) as video_input_group:
@@ -1120,6 +1126,7 @@ def create_interface(
             # The order here MUST match the order in the `ips` list.
             # RT_BORG: Global settings gpu_memory_preservation, mp4_crf, save_metadata removed from direct args.
             (input_image_arg,
+             additional_frames_arg,
              input_video_arg,
              end_frame_image_original_arg,
              end_frame_strength_original_arg,
@@ -1174,7 +1181,7 @@ def create_interface(
             # Use the current seed value as is for this job
             # Call the process function with all arguments
             # Pass the backend_model_type and the ORIGINAL prompt_text string to the backend process function
-            result = process_fn(backend_model_type, input_data, actual_end_frame_image_for_backend, actual_end_frame_strength_for_backend,
+            result = process_fn(backend_model_type, input_data, additional_frames_arg, actual_end_frame_image_for_backend, actual_end_frame_strength_for_backend,
                                 prompt_text_arg, n_prompt_arg, seed_arg, total_second_length_arg,
                                 latent_window_size_arg, steps_arg, cfg_arg, gs_arg, rs_arg,
                                 use_teacache_arg, teacache_num_steps_arg, teacache_rel_l1_thresh_arg,
@@ -1259,6 +1266,7 @@ def create_interface(
         # --- Inputs for all models ---
         ips = [
             input_image,                # Corresponds to input_image_arg
+            additional_frames,          # Corresponds to additional_frames_arg
             input_video,                # Corresponds to input_video_arg
             end_frame_image_original,   # Corresponds to end_frame_image_original_arg
             end_frame_strength_original,# Corresponds to end_frame_strength_original_arg
