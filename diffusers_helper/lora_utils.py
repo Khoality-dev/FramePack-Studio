@@ -13,53 +13,49 @@ def _convert_musubi_lora_to_diffusers(
     diffusers_prefix: str = "transformer",
 ) -> Dict[str, torch.Tensor]:
     """Convert a Musubi/FramePack style LoRA to the Diffusers format."""
+
     lora_alphas = {}
     for key, weight in weights_sd.items():
-        if key.startswith(prefix):
+        if key.startswith(prefix) and "alpha" in key:
             lora_name = key.split(".", 1)[0]
-            if lora_name not in lora_alphas and "alpha" in key:
-                lora_alphas[lora_name] = weight
+            lora_alphas[lora_name] = weight
 
     new_weights_sd = {}
     for key, weight in weights_sd.items():
-        if key.startswith(prefix):
-            if "alpha" in key:
-                continue
+        if not key.startswith(prefix) or "alpha" in key:
+            continue
 
-            lora_name = key.split(".", 1)[0]
-            module_name = lora_name[len(prefix):].replace("_", ".")
+        lora_name = key.split(".", 1)[0]
+        module_name = lora_name[len(prefix) :].replace("_", ".")
 
-            if ".cross.attn." in module_name or ".self.attn." in module_name:
-                module_name = module_name.replace("cross.attn", "cross_attn")
-                module_name = module_name.replace("self.attn", "self_attn")
-            else:
-                module_name = module_name.replace("double.blocks.", "double_blocks.")
-                module_name = module_name.replace("single.blocks.", "single_blocks.")
-                module_name = module_name.replace("img.", "img_")
-                module_name = module_name.replace("txt.", "txt_")
-                module_name = module_name.replace("attn.", "attn_")
+        # Restore underscores that exist in the original module names
+        module_name = module_name.replace("transformer.blocks.", "transformer_blocks.")
+        module_name = module_name.replace("single.transformer.blocks.", "single_transformer_blocks.")
+        module_name = module_name.replace("double.blocks.", "double_blocks.")
+        module_name = module_name.replace("single.blocks.", "single_blocks.")
 
-            # Most FramePack/Musubi LoRAs are intended for the video transformer
-            # component in Diffusers which expects the prefix ``"transformer"``.
-            # Allow overriding this in case a different prefix is required.
-            if "lora_down" in key:
-                new_key = f"{diffusers_prefix}.{module_name}.lora_A.weight"
-                dim = weight.shape[0]
-            elif "lora_up" in key:
-                new_key = f"{diffusers_prefix}.{module_name}.lora_B.weight"
-                dim = weight.shape[1]
-            else:
-                print(f"Unexpected key: {key} in Musubi LoRA format")
-                continue
+        # Restore common naming patterns
+        module_name = module_name.replace("attn_to_", "attn.to_")
+        module_name = module_name.replace("ff_net_", "ff.net_")
+        module_name = module_name.replace("ff_context_net_", "ff_context.net_")
+        module_name = module_name.replace("attn_to_out_0", "attn.to_out.0")
+        module_name = module_name.replace("attn_to_add_out", "attn.to_add_out")
 
-            if lora_name in lora_alphas:
-                scale = lora_alphas[lora_name] / dim
-                scale = scale.sqrt()
-                weight = weight * scale
-            else:
-                print(f"Warning: missing alpha for {lora_name}")
+        if "lora_down" in key:
+            new_key = f"{diffusers_prefix}.{module_name}.lora_A.weight"
+            dim = weight.shape[0]
+        elif "lora_up" in key:
+            new_key = f"{diffusers_prefix}.{module_name}.lora_B.weight"
+            dim = weight.shape[1]
+        else:
+            print(f"Unexpected key: {key} in Musubi LoRA format")
+            continue
 
-            new_weights_sd[new_key] = weight
+        if lora_name in lora_alphas:
+            scale = lora_alphas[lora_name] / dim
+            weight = weight * scale.sqrt()
+
+        new_weights_sd[new_key] = weight
 
     return new_weights_sd
 
