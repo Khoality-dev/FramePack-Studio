@@ -7,7 +7,11 @@ from diffusers.loaders.peft import _SET_ADAPTER_SCALE_FN_MAPPING
 import torch
 
 
-def _convert_musubi_lora_to_diffusers(prefix: str, weights_sd: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+def _convert_musubi_lora_to_diffusers(
+    prefix: str,
+    weights_sd: Dict[str, torch.Tensor],
+    diffusers_prefix: str = "transformer",
+) -> Dict[str, torch.Tensor]:
     """Convert a Musubi/FramePack style LoRA to the Diffusers format."""
     lora_alphas = {}
     for key, weight in weights_sd.items():
@@ -35,7 +39,9 @@ def _convert_musubi_lora_to_diffusers(prefix: str, weights_sd: Dict[str, torch.T
                 module_name = module_name.replace("txt.", "txt_")
                 module_name = module_name.replace("attn.", "attn_")
 
-            diffusers_prefix = "diffusion_model"
+            # Most FramePack/Musubi LoRAs are intended for the video transformer
+            # component in Diffusers which expects the prefix ``"transformer"``.
+            # Allow overriding this in case a different prefix is required.
             if "lora_down" in key:
                 new_key = f"{diffusers_prefix}.{module_name}.lora_A.weight"
                 dim = weight.shape[0]
@@ -91,7 +97,9 @@ def load_lora(transformer: torch.nn.Module, lora_path: Path, weight_name: str) -
     keys = list(state_dict.keys())
     if any(k.startswith("lora_unet_") for k in keys):
         print("Musubi LoRA detected. Converting to diffusers format.")
-        state_dict = _convert_musubi_lora_to_diffusers("lora_unet_", state_dict)
+        state_dict = _convert_musubi_lora_to_diffusers(
+            "lora_unet_", state_dict, diffusers_prefix="transformer"
+        )
     else:
         state_dict = _convert_hunyuan_video_lora_to_diffusers(state_dict)
     
