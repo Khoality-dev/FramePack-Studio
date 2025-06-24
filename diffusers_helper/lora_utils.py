@@ -6,6 +6,57 @@ from diffusers.utils.peft_utils import set_weights_and_activate_adapters
 from diffusers.loaders.peft import _SET_ADAPTER_SCALE_FN_MAPPING
 import torch
 
+
+def _convert_musubi_lora_to_diffusers(prefix: str, weights_sd: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    """Convert a Musubi/FramePack style LoRA to the Diffusers format."""
+    lora_alphas = {}
+    for key, weight in weights_sd.items():
+        if key.startswith(prefix):
+            lora_name = key.split(".", 1)[0]
+            if lora_name not in lora_alphas and "alpha" in key:
+                lora_alphas[lora_name] = weight
+
+    new_weights_sd = {}
+    for key, weight in weights_sd.items():
+        if key.startswith(prefix):
+            if "alpha" in key:
+                continue
+
+            lora_name = key.split(".", 1)[0]
+            module_name = lora_name[len(prefix):].replace("_", ".")
+
+            if ".cross.attn." in module_name or ".self.attn." in module_name:
+                module_name = module_name.replace("cross.attn", "cross_attn")
+                module_name = module_name.replace("self.attn", "self_attn")
+            else:
+                module_name = module_name.replace("double.blocks.", "double_blocks.")
+                module_name = module_name.replace("single.blocks.", "single_blocks.")
+                module_name = module_name.replace("img.", "img_")
+                module_name = module_name.replace("txt.", "txt_")
+                module_name = module_name.replace("attn.", "attn_")
+
+            diffusers_prefix = "diffusion_model"
+            if "lora_down" in key:
+                new_key = f"{diffusers_prefix}.{module_name}.lora_A.weight"
+                dim = weight.shape[0]
+            elif "lora_up" in key:
+                new_key = f"{diffusers_prefix}.{module_name}.lora_B.weight"
+                dim = weight.shape[1]
+            else:
+                print(f"Unexpected key: {key} in Musubi LoRA format")
+                continue
+
+            if lora_name in lora_alphas:
+                scale = lora_alphas[lora_name] / dim
+                scale = scale.sqrt()
+                weight = weight * scale
+            else:
+                print(f"Warning: missing alpha for {lora_name}")
+
+            new_weights_sd[new_key] = weight
+
+    return new_weights_sd
+
 FALLBACK_CLASS_ALIASES = {
     "HunyuanVideoTransformer3DModelPacked": "HunyuanVideoTransformer3DModel",
 }
@@ -37,7 +88,12 @@ def load_lora(transformer: torch.nn.Module, lora_path: Path, weight_name: str) -
         None,
         None)
 
-    state_dict = _convert_hunyuan_video_lora_to_diffusers(state_dict)
+    keys = list(state_dict.keys())
+    if any(k.startswith("lora_unet_") for k in keys):
+        print("Musubi LoRA detected. Converting to diffusers format.")
+        state_dict = _convert_musubi_lora_to_diffusers("lora_unet_", state_dict)
+    else:
+        state_dict = _convert_hunyuan_video_lora_to_diffusers(state_dict)
     
     # should weight_name even be Optional[str] or just str?
     # For now, we assume it is never None
